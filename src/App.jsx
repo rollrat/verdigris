@@ -194,159 +194,226 @@ function createNotchedBlockGeometry(width, height, depth, notchSide, notchRadius
   return geometry;
 }
 
-function BlockWallStructure({ noise }) {
+function CorridorStructure({ noise }) {
   const tealMeshRef = useRef();
   const goldMeshRef = useRef();
   const tempObject = useMemo(() => new THREE.Object3D(), []);
   
-  const wallData = useMemo(() => {
-    const tealStandard = { positions: [], scales: [], colors: [] };
-    const goldStandard = { positions: [], scales: [], colors: [] };
+  const corridorData = useMemo(() => {
+    const tealBlocks = { positions: [], scales: [], colors: [] };
+    const goldBlocks = { positions: [], scales: [], colors: [] };
     const tealNotched = [];
     const goldNotched = [];
     
-    const wallWidth = 60;
-    const wallHeight = 80;
-    const unitSize = 1.5;
+    const unitSize = 1.0;
+    const corridorHalfWidth = 9;
+    const wallHeight = 28;
+    const wallThickness = 4;
+    const corridorLength = 100;
+    const ceilingThickness = 4;
     const notchRadius = 0.25;
-    
-    const goldZoneStart = Math.floor(wallWidth * 0.30);
-    const goldZoneEnd = Math.floor(wallWidth * 0.70);
     
     const seededRandom = (seed) => {
       const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
       return x - Math.floor(x);
     };
     
-    const occupied = new Set();
-    const isOccupied = (x, y, w, h) => {
-      for (let dx = 0; dx < w; dx++) {
-        for (let dy = 0; dy < h; dy++) {
-          if (occupied.has(`${x + dx},${y + dy}`)) return true;
-        }
+    const addBlock = (pos, scale, isGold, seed, hasNotch, notchSide) => {
+      const colorVar = seededRandom(seed * 8.1);
+      let color;
+      if (isGold) {
+        color = colorVar > 0.5 ? GOLD_BRIGHT.clone() : GOLD_DARK.clone();
+      } else {
+        if (colorVar < 0.33) color = TEAL_DARK.clone();
+        else if (colorVar < 0.66) color = TEAL_MID.clone();
+        else color = TEAL_DEEP.clone();
       }
-      return false;
-    };
-    const markOccupied = (x, y, w, h) => {
-      for (let dx = 0; dx < w; dx++) {
-        for (let dy = 0; dy < h; dy++) {
-          occupied.add(`${x + dx},${y + dy}`);
-        }
+      
+      if (hasNotch) {
+        const notchData = {
+          position: pos,
+          width: scale[0],
+          height: scale[1],
+          depth: scale[2],
+          notchSide,
+          notchRadius: notchRadius * unitSize,
+          color,
+        };
+        if (isGold) goldNotched.push(notchData);
+        else tealNotched.push(notchData);
+      } else {
+        const target = isGold ? goldBlocks : tealBlocks;
+        target.positions.push(pos);
+        target.scales.push(scale);
+        target.colors.push(color);
       }
     };
     
-    let blockIndex = 0;
+    let blockIdx = 0;
     
-    for (let gx = 0; gx < wallWidth; gx++) {
-      for (let gy = 0; gy < wallHeight; gy++) {
-        if (occupied.has(`${gx},${gy}`)) continue;
-        
-        const seed = blockIndex * 17.31 + gx * 7.13 + gy * 3.71;
-        const sizeRand = seededRandom(seed);
-        
-        let blockW = 1, blockH = 1;
-        const sizeIdx = Math.floor(sizeRand * BLOCK_SIZES.length);
-        const [candidateW, candidateH] = BLOCK_SIZES[sizeIdx];
-        
-        if (gx + candidateW <= wallWidth && gy + candidateH <= wallHeight) {
-          if (!isOccupied(gx, gy, candidateW, candidateH)) {
-            blockW = candidateW;
-            blockH = candidateH;
+    const generateWall = (side) => {
+      const xSign = side === 'left' ? -1 : 1;
+      const wallBaseX = xSign * corridorHalfWidth;
+      const occupied = new Set();
+      const key = (y, z, d) => `${y},${z},${d}`;
+      
+      for (let gd = 0; gd < wallThickness; gd++) {
+        for (let gz = 0; gz < corridorLength; gz++) {
+          for (let gy = 0; gy < wallHeight; gy++) {
+            if (occupied.has(key(gy, gz, gd))) continue;
+            
+            const seed = blockIdx * 13.71 + gy * 7.31 + gz * 3.17 + gd * 11.91 + (side === 'left' ? 0 : 1000);
+            
+            const sizeRand = seededRandom(seed);
+            const sizeIdx = Math.floor(sizeRand * BLOCK_SIZES.length);
+            let [bh, bz] = BLOCK_SIZES[sizeIdx];
+            
+            if (gy + bh > wallHeight) bh = 1;
+            if (gz + bz > corridorLength) bz = 1;
+            
+            let canPlace = true;
+            for (let dy = 0; dy < bh && canPlace; dy++) {
+              for (let dz = 0; dz < bz && canPlace; dz++) {
+                if (occupied.has(key(gy + dy, gz + dz, gd))) canPlace = false;
+              }
+            }
+            if (!canPlace) { bh = 1; bz = 1; }
+            
+            for (let dy = 0; dy < bh; dy++) {
+              for (let dz = 0; dz < bz; dz++) {
+                occupied.add(key(gy + dy, gz + dz, gd));
+              }
+            }
+            
+            const depthVariation = (seededRandom(seed * 4.3) - 0.5) * 0.15;
+            const xOffset = gd + depthVariation;
+            
+            const worldX = wallBaseX + xSign * (xOffset + 0.5) * unitSize;
+            const worldY = (gy + bh / 2) * unitSize;
+            const worldZ = (gz + bz / 2 - corridorLength / 2) * unitSize;
+            
+            const isInnerFace = gd === 0;
+            const hasNotch = isInnerFace && seededRandom(seed * 5.3) < 0.22;
+            const notchSide = hasNotch ? NOTCH_POSITIONS[Math.floor(seededRandom(seed * 6.7) * 4)] : null;
+            
+            addBlock(
+              [worldX, worldY, worldZ],
+              [unitSize, bh * unitSize, bz * unitSize],
+              false,
+              seed,
+              hasNotch,
+              notchSide
+            );
+            
+            blockIdx++;
           }
         }
-        
-        markOccupied(gx, gy, blockW, blockH);
-        
-        const zoneBoundaryNoise = (seededRandom(seed * 2.1) - 0.5) * 3;
-        const effectiveGoldStart = goldZoneStart + zoneBoundaryNoise;
-        const effectiveGoldEnd = goldZoneEnd + zoneBoundaryNoise;
-        const blockCenterX = gx + blockW / 2;
-        const isGold = blockCenterX >= effectiveGoldStart && blockCenterX <= effectiveGoldEnd;
-        
-        const depthNoise = seededRandom(seed * 3.7);
-        const depth = unitSize * (0.8 + depthNoise * 0.4);
-        
-        const worldX = (gx + blockW / 2 - wallWidth / 2) * unitSize;
-        const worldY = (gy + blockH / 2 - wallHeight / 2) * unitSize;
-        const worldZ = (depthNoise - 0.5) * unitSize * 0.15;
-        
-        const hasNotch = seededRandom(seed * 5.3) < 0.25;
-        
-        const colorVar = seededRandom(seed * (isGold ? 8.1 : 9.3));
-        let color;
-        if (isGold) {
-          color = colorVar > 0.5 ? GOLD_BRIGHT.clone() : GOLD_DARK.clone();
-        } else {
-          if (colorVar < 0.4) color = TEAL_DARK.clone();
-          else if (colorVar < 0.75) color = TEAL_MID.clone();
-          else color = TEAL_DEEP.clone();
-        }
-        
-        if (hasNotch) {
-          const notchIdx = Math.floor(seededRandom(seed * 6.7) * 4);
-          const notchSide = NOTCH_POSITIONS[notchIdx];
-          const notchData = {
-            position: [worldX, worldY, worldZ],
-            width: blockW * unitSize,
-            height: blockH * unitSize,
-            depth: depth,
-            notchSide,
-            notchRadius: notchRadius * unitSize,
-            color,
-          };
-          if (isGold) {
-            goldNotched.push(notchData);
-          } else {
-            tealNotched.push(notchData);
-          }
-        } else {
-          const target = isGold ? goldStandard : tealStandard;
-          target.positions.push([worldX, worldY, worldZ]);
-          target.scales.push([blockW * unitSize, blockH * unitSize, depth]);
-          target.colors.push(color);
-        }
-        
-        blockIndex++;
       }
-    }
+    };
     
-    console.log(`Wall: ${tealStandard.positions.length} teal std, ${tealNotched.length} teal notched, ${goldStandard.positions.length} gold std, ${goldNotched.length} gold notched`);
-    return { tealStandard, goldStandard, tealNotched, goldNotched };
+    const generateCeiling = () => {
+      const ceilingY = wallHeight * unitSize;
+      const totalWidth = corridorHalfWidth * 2 + wallThickness * 2;
+      const goldZoneHalfWidth = totalWidth * 0.25;
+      const occupied = new Set();
+      const key = (x, z, d) => `${x},${z},${d}`;
+      
+      for (let gd = 0; gd < ceilingThickness; gd++) {
+        for (let gz = 0; gz < corridorLength; gz++) {
+          for (let gx = 0; gx < totalWidth; gx++) {
+            if (occupied.has(key(gx, gz, gd))) continue;
+            
+            const seed = blockIdx * 19.37 + gx * 5.71 + gz * 9.13 + gd * 14.17;
+            
+            const sizeRand = seededRandom(seed);
+            const sizeIdx = Math.floor(sizeRand * BLOCK_SIZES.length);
+            let [bx, bz] = BLOCK_SIZES[sizeIdx];
+            
+            if (gx + bx > totalWidth) bx = 1;
+            if (gz + bz > corridorLength) bz = 1;
+            
+            let canPlace = true;
+            for (let dx = 0; dx < bx && canPlace; dx++) {
+              for (let dz = 0; dz < bz && canPlace; dz++) {
+                if (occupied.has(key(gx + dx, gz + dz, gd))) canPlace = false;
+              }
+            }
+            if (!canPlace) { bx = 1; bz = 1; }
+            
+            for (let dx = 0; dx < bx; dx++) {
+              for (let dz = 0; dz < bz; dz++) {
+                occupied.add(key(gx + dx, gz + dz, gd));
+              }
+            }
+            
+            const worldX = (gx + bx / 2 - totalWidth / 2) * unitSize;
+            const depthVariation = (seededRandom(seed * 4.5) - 0.5) * 0.1;
+            const worldY = ceilingY + (gd + 0.5 + depthVariation) * unitSize;
+            const worldZ = (gz + bz / 2 - corridorLength / 2) * unitSize;
+            
+            const distFromCenter = Math.abs(gx + bx / 2 - totalWidth / 2);
+            const isGold = distFromCenter < goldZoneHalfWidth;
+            
+            const isBottomFace = gd === 0;
+            const hasNotch = isBottomFace && seededRandom(seed * 5.9) < 0.22;
+            const notchSide = hasNotch ? NOTCH_POSITIONS[Math.floor(seededRandom(seed * 6.3) * 4)] : null;
+            
+            addBlock(
+              [worldX, worldY, worldZ],
+              [bx * unitSize, unitSize, bz * unitSize],
+              isGold,
+              seed,
+              hasNotch,
+              notchSide
+            );
+            
+            blockIdx++;
+          }
+        }
+      }
+    };
+    
+    generateWall('left');
+    generateWall('right');
+    generateCeiling();
+    
+    console.log(`Corridor: ${tealBlocks.positions.length} teal, ${goldBlocks.positions.length} gold, ${tealNotched.length + goldNotched.length} notched`);
+    return { tealBlocks, goldBlocks, tealNotched, goldNotched };
   }, [noise]);
   
   useEffect(() => {
-    if (tealMeshRef.current && wallData.tealStandard.positions.length > 0) {
-      for (let i = 0; i < wallData.tealStandard.positions.length; i++) {
-        const [x, y, z] = wallData.tealStandard.positions[i];
-        const [sx, sy, sz] = wallData.tealStandard.scales[i];
+    if (tealMeshRef.current && corridorData.tealBlocks.positions.length > 0) {
+      for (let i = 0; i < corridorData.tealBlocks.positions.length; i++) {
+        const [x, y, z] = corridorData.tealBlocks.positions[i];
+        const [sx, sy, sz] = corridorData.tealBlocks.scales[i];
         tempObject.position.set(x, y, z);
         tempObject.scale.set(sx, sy, sz);
         tempObject.rotation.set(0, 0, 0);
         tempObject.updateMatrix();
         tealMeshRef.current.setMatrixAt(i, tempObject.matrix);
-        tealMeshRef.current.setColorAt(i, wallData.tealStandard.colors[i]);
+        tealMeshRef.current.setColorAt(i, corridorData.tealBlocks.colors[i]);
       }
       tealMeshRef.current.instanceMatrix.needsUpdate = true;
       tealMeshRef.current.instanceColor.needsUpdate = true;
     }
-  }, [wallData.tealStandard, tempObject]);
+  }, [corridorData.tealBlocks, tempObject]);
   
   useEffect(() => {
-    if (goldMeshRef.current && wallData.goldStandard.positions.length > 0) {
-      for (let i = 0; i < wallData.goldStandard.positions.length; i++) {
-        const [x, y, z] = wallData.goldStandard.positions[i];
-        const [sx, sy, sz] = wallData.goldStandard.scales[i];
+    if (goldMeshRef.current && corridorData.goldBlocks.positions.length > 0) {
+      for (let i = 0; i < corridorData.goldBlocks.positions.length; i++) {
+        const [x, y, z] = corridorData.goldBlocks.positions[i];
+        const [sx, sy, sz] = corridorData.goldBlocks.scales[i];
         tempObject.position.set(x, y, z);
         tempObject.scale.set(sx, sy, sz);
         tempObject.rotation.set(0, 0, 0);
         tempObject.updateMatrix();
         goldMeshRef.current.setMatrixAt(i, tempObject.matrix);
-        goldMeshRef.current.setColorAt(i, wallData.goldStandard.colors[i]);
+        goldMeshRef.current.setColorAt(i, corridorData.goldBlocks.colors[i]);
       }
       goldMeshRef.current.instanceMatrix.needsUpdate = true;
       goldMeshRef.current.instanceColor.needsUpdate = true;
     }
-  }, [wallData.goldStandard, tempObject]);
+  }, [corridorData.goldBlocks, tempObject]);
   
   const unitBoxGeo = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
   
@@ -354,7 +421,7 @@ function BlockWallStructure({ noise }) {
     <>
       <instancedMesh 
         ref={tealMeshRef} 
-        args={[unitBoxGeo, null, Math.max(wallData.tealStandard.positions.length, 1)]} 
+        args={[unitBoxGeo, null, Math.max(corridorData.tealBlocks.positions.length, 1)]} 
         castShadow 
         receiveShadow
       >
@@ -363,18 +430,18 @@ function BlockWallStructure({ noise }) {
       
       <instancedMesh 
         ref={goldMeshRef} 
-        args={[unitBoxGeo, null, Math.max(wallData.goldStandard.positions.length, 1)]} 
+        args={[unitBoxGeo, null, Math.max(corridorData.goldBlocks.positions.length, 1)]} 
         castShadow 
         receiveShadow
       >
         <GoldMaterial />
       </instancedMesh>
       
-      {wallData.tealNotched.map((block, i) => (
+      {corridorData.tealNotched.map((block, i) => (
         <NotchedBlock key={`teal-notch-${i}`} {...block} materialType="teal" />
       ))}
       
-      {wallData.goldNotched.map((block, i) => (
+      {corridorData.goldNotched.map((block, i) => (
         <NotchedBlock key={`gold-notch-${i}`} {...block} materialType="gold" />
       ))}
     </>
@@ -449,31 +516,31 @@ function DustParticles() {
   return (
     <>
       <Sparkles
-        count={500}
-        scale={[100, 130, 80]}
+        count={300}
+        scale={[16, 26, 90]}
         size={1.0}
-        speed={0.015}
-        opacity={0.3}
-        color={0x808080}
-        position={[0, 0, 30]}
+        speed={0.008}
+        opacity={0.35}
+        color={0xa0a0a0}
+        position={[0, 14, 0]}
       />
       <Sparkles
-        count={200}
-        scale={[60, 80, 40]}
-        size={2.0}
-        speed={0.02}
+        count={120}
+        scale={[14, 20, 70]}
+        size={1.8}
+        speed={0.012}
         opacity={0.6}
         color={0xffd040}
-        position={[0, 20, 20]}
+        position={[0, 20, 0]}
       />
       <Sparkles
-        count={100}
-        scale={[40, 60, 30]}
-        size={2.5}
-        speed={0.01}
-        opacity={0.7}
+        count={60}
+        scale={[12, 15, 50]}
+        size={2.2}
+        speed={0.006}
+        opacity={0.5}
         color={0x40ffff}
-        position={[-20, -10, 25]}
+        position={[0, 18, 0]}
       />
     </>
   );
@@ -491,8 +558,8 @@ function FPSControls({ onLockChange, onDebugUpdate }) {
   
   useEffect(() => {
     if (!initialized.current) {
-      camera.position.set(0, 0, 80);
-      camera.lookAt(0, 0, 0);
+      camera.position.set(0, 5, 30);
+      camera.lookAt(0, 14, -20);
       initialized.current = true;
     }
   }, [camera]);
@@ -582,24 +649,26 @@ function Scene({ onLockChange, onDebugUpdate }) {
       <hemisphereLight args={[0xffffff, 0xc0c0c0, config.hemisphereIntensity]} />
       
       <directionalLight
-        position={[30, 80, 100]}
+        position={[0, 50, 20]}
         intensity={config.directionalIntensity}
         color={0xfffef8}
         castShadow
         shadow-mapSize={[4096, 4096]}
-        shadow-camera-far={300}
-        shadow-camera-left={-80}
-        shadow-camera-right={80}
-        shadow-camera-top={100}
-        shadow-camera-bottom={-100}
-        shadow-bias={-0.0001}
+        shadow-camera-far={200}
+        shadow-camera-left={-30}
+        shadow-camera-right={30}
+        shadow-camera-top={60}
+        shadow-camera-bottom={-60}
+        shadow-bias={-0.0002}
       />
       
-      <pointLight position={[0, 0, 60]} intensity={3} color={0xffffff} distance={200} decay={2} />
-      <pointLight position={[-30, 20, 50]} intensity={2} color={0x80ffff} distance={150} decay={2} />
-      <pointLight position={[30, -20, 50]} intensity={2} color={0xffd080} distance={150} decay={2} />
+      <pointLight position={[0, 26, 0]} intensity={5} color={0xffd080} distance={50} decay={2} />
+      <pointLight position={[0, 26, -25]} intensity={4} color={0xffffff} distance={45} decay={2} />
+      <pointLight position={[0, 26, 25]} intensity={4} color={0xffffff} distance={45} decay={2} />
+      <pointLight position={[-7, 10, 0]} intensity={2.5} color={0x60ffff} distance={35} decay={2} />
+      <pointLight position={[7, 10, 0]} intensity={2.5} color={0x60ffff} distance={35} decay={2} />
       
-      <BlockWallStructure noise={noise} />
+      <CorridorStructure noise={noise} />
       
       <DustParticles />
       
@@ -846,7 +915,7 @@ export default function App() {
       <Canvas
         id="game-canvas"
         shadows
-        camera={{ position: [0, 0, 80], fov: 60, near: 0.1, far: 500 }}
+        camera={{ position: [0, 5, 30], fov: 70, near: 0.1, far: 500 }}
         gl={{ 
           antialias: true, 
           toneMapping: THREE.ACESFilmicToneMapping, 
