@@ -129,144 +129,232 @@ function TealMaterial() {
   );
 }
 
-function Chaos3DStructure({ noise }) {
+const BLOCK_SIZES = [
+  [1, 1], [1, 1], [1, 1],
+  [1, 2], [2, 1],
+  [1, 3], [3, 1],
+  [2, 2],
+  [2, 3], [3, 2],
+];
+
+const NOTCH_POSITIONS = ['top', 'bottom', 'left', 'right'];
+
+function createNotchedBlockGeometry(width, height, depth, notchSide, notchRadius) {
+  const shape = new THREE.Shape();
+  const w = width / 2;
+  const h = height / 2;
+  const r = Math.min(notchRadius, Math.min(w, h) * 0.8);
+  
+  shape.moveTo(-w, -h);
+  
+  if (notchSide === 'bottom') {
+    shape.lineTo(-r, -h);
+    shape.absarc(0, -h, r, Math.PI, 0, true);
+    shape.lineTo(w, -h);
+  } else {
+    shape.lineTo(w, -h);
+  }
+  
+  if (notchSide === 'right') {
+    shape.lineTo(w, -r);
+    shape.absarc(w, 0, r, -Math.PI/2, Math.PI/2, true);
+    shape.lineTo(w, h);
+  } else {
+    shape.lineTo(w, h);
+  }
+  
+  if (notchSide === 'top') {
+    shape.lineTo(r, h);
+    shape.absarc(0, h, r, 0, Math.PI, true);
+    shape.lineTo(-w, h);
+  } else {
+    shape.lineTo(-w, h);
+  }
+  
+  if (notchSide === 'left') {
+    shape.lineTo(-w, r);
+    shape.absarc(-w, 0, r, Math.PI/2, -Math.PI/2, true);
+    shape.lineTo(-w, -h);
+  } else {
+    shape.lineTo(-w, -h);
+  }
+  
+  const extrudeSettings = {
+    depth: depth,
+    bevelEnabled: true,
+    bevelThickness: 0.03,
+    bevelSize: 0.03,
+    bevelSegments: 2,
+    curveSegments: 12,
+  };
+  
+  const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+  geometry.translate(0, 0, -depth / 2);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function BlockWallStructure({ noise }) {
   const tealMeshRef = useRef();
   const goldMeshRef = useRef();
   const tempObject = useMemo(() => new THREE.Object3D(), []);
   
-  const { tealBlocks, goldBlocks } = useMemo(() => {
-    const teal = { positions: [], scales: [], colors: [] };
-    const gold = { positions: [], scales: [], colors: [] };
+  const wallData = useMemo(() => {
+    const tealStandard = { positions: [], scales: [], colors: [] };
+    const goldStandard = { positions: [], scales: [], colors: [] };
+    const tealNotched = [];
+    const goldNotched = [];
     
-    const sizeX = 120;
-    const sizeY = 160;
-    const sizeZ = 160;
-    const spacing = 3.5;
-    const baseThreshold = 0.45;
-    const goldThreshold = 0.58;
+    const wallWidth = 60;
+    const wallHeight = 80;
+    const unitSize = 1.5;
+    const notchRadius = 0.25;
+    
+    const goldZoneStart = Math.floor(wallWidth * 0.30);
+    const goldZoneEnd = Math.floor(wallWidth * 0.70);
     
     const seededRandom = (seed) => {
       const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
       return x - Math.floor(x);
     };
     
+    const occupied = new Set();
+    const isOccupied = (x, y, w, h) => {
+      for (let dx = 0; dx < w; dx++) {
+        for (let dy = 0; dy < h; dy++) {
+          if (occupied.has(`${x + dx},${y + dy}`)) return true;
+        }
+      }
+      return false;
+    };
+    const markOccupied = (x, y, w, h) => {
+      for (let dx = 0; dx < w; dx++) {
+        for (let dy = 0; dy < h; dy++) {
+          occupied.add(`${x + dx},${y + dy}`);
+        }
+      }
+    };
+    
     let blockIndex = 0;
     
-    for (let x = -sizeX/2; x < sizeX/2; x += spacing) {
-      for (let y = -sizeY/2; y < sizeY/2; y += spacing) {
-        for (let z = -sizeZ/2; z < sizeZ/2; z += spacing) {
-          
-          const [wx, wy, wz] = domainWarp(noise, x * 0.012, y * 0.008, z * 0.012, 8.0);
-          
-          const baseDensity = ridgedNoise(noise, wx, wy, wz);
-          const pillarNoise = fbm(noise, x * 0.02, y * 0.003, z * 0.02, 4);
-          const caveNoise = fbm(noise, x * 0.015 + 50, y * 0.015, z * 0.015 + 50, 5);
-          
-          const verticalBias = Math.exp(-Math.abs(y) * 0.003) * 0.3;
-          const density = baseDensity * 0.5 + pillarNoise * 0.35 + verticalBias + caveNoise * 0.15;
-          
-          const distXZ = Math.sqrt(x*x + z*z);
-          const corridorWidth = 12 + fbm(noise, y * 0.02, 0, 0, 2) * 8;
-          const inCorridor = distXZ < corridorWidth && y > -80 && y < 80;
-          
-          const threshold = inCorridor ? baseThreshold + 0.25 : baseThreshold;
-          
-          if (density < threshold) continue;
-          
-          const falloff = Math.max(0, 1 - Math.pow(distXZ / (sizeX * 0.6), 2));
-          if (seededRandom(blockIndex * 3.7) > falloff + 0.3) {
-            blockIndex++;
-            continue;
+    for (let gx = 0; gx < wallWidth; gx++) {
+      for (let gy = 0; gy < wallHeight; gy++) {
+        if (occupied.has(`${gx},${gy}`)) continue;
+        
+        const seed = blockIndex * 17.31 + gx * 7.13 + gy * 3.71;
+        const sizeRand = seededRandom(seed);
+        
+        let blockW = 1, blockH = 1;
+        const sizeIdx = Math.floor(sizeRand * BLOCK_SIZES.length);
+        const [candidateW, candidateH] = BLOCK_SIZES[sizeIdx];
+        
+        if (gx + candidateW <= wallWidth && gy + candidateH <= wallHeight) {
+          if (!isOccupied(gx, gy, candidateW, candidateH)) {
+            blockW = candidateW;
+            blockH = candidateH;
           }
-          
-          const goldNoise1 = noise(x * 0.04 + 100, y * 0.06, z * 0.04);
-          const goldNoise2 = noise(x * 0.08, y * 0.03 + 200, z * 0.08);
-          const isGold = goldNoise1 > goldThreshold || (goldNoise2 > 0.6 && y > 0);
-          
-          const scaleNoise = Math.abs(noise(x * 0.1, y * 0.1, z * 0.1));
-          const rand1 = seededRandom(blockIndex * 1.1);
-          const rand2 = seededRandom(blockIndex * 2.3);
-          const rand3 = seededRandom(blockIndex * 3.7);
-          
-          const cubeSize = spacing * (0.6 + scaleNoise * 1.5);
-          
-          const jitterX = (rand1 - 0.5) * spacing * 0.6;
-          const jitterY = (rand2 - 0.5) * spacing * 0.6;
-          const jitterZ = (rand3 - 0.5) * spacing * 0.6;
-          
-          const pos = [x + jitterX, y + jitterY, z + jitterZ];
-          const scale = [cubeSize, cubeSize, cubeSize];
-          
-          if (isGold) {
-            gold.positions.push(pos);
-            gold.scales.push(scale);
-            const colorVar = seededRandom(blockIndex * 5.1);
-            gold.colors.push(colorVar > 0.5 ? GOLD_BRIGHT.clone() : GOLD_DARK.clone());
-          } else {
-            teal.positions.push(pos);
-            teal.scales.push(scale);
-            const colorVar = seededRandom(blockIndex * 7.3);
-            if (colorVar < 0.4) {
-              teal.colors.push(TEAL_DARK.clone());
-            } else if (colorVar < 0.75) {
-              teal.colors.push(TEAL_MID.clone());
-            } else {
-              teal.colors.push(TEAL_DEEP.clone());
-            }
-          }
-          
-          blockIndex++;
         }
+        
+        markOccupied(gx, gy, blockW, blockH);
+        
+        const zoneBoundaryNoise = (seededRandom(seed * 2.1) - 0.5) * 3;
+        const effectiveGoldStart = goldZoneStart + zoneBoundaryNoise;
+        const effectiveGoldEnd = goldZoneEnd + zoneBoundaryNoise;
+        const blockCenterX = gx + blockW / 2;
+        const isGold = blockCenterX >= effectiveGoldStart && blockCenterX <= effectiveGoldEnd;
+        
+        const depthNoise = seededRandom(seed * 3.7);
+        const depth = unitSize * (0.8 + depthNoise * 0.4);
+        
+        const worldX = (gx + blockW / 2 - wallWidth / 2) * unitSize;
+        const worldY = (gy + blockH / 2 - wallHeight / 2) * unitSize;
+        const worldZ = (depthNoise - 0.5) * unitSize * 0.15;
+        
+        const hasNotch = seededRandom(seed * 5.3) < 0.25;
+        
+        const colorVar = seededRandom(seed * (isGold ? 8.1 : 9.3));
+        let color;
+        if (isGold) {
+          color = colorVar > 0.5 ? GOLD_BRIGHT.clone() : GOLD_DARK.clone();
+        } else {
+          if (colorVar < 0.4) color = TEAL_DARK.clone();
+          else if (colorVar < 0.75) color = TEAL_MID.clone();
+          else color = TEAL_DEEP.clone();
+        }
+        
+        if (hasNotch) {
+          const notchIdx = Math.floor(seededRandom(seed * 6.7) * 4);
+          const notchSide = NOTCH_POSITIONS[notchIdx];
+          const notchData = {
+            position: [worldX, worldY, worldZ],
+            width: blockW * unitSize,
+            height: blockH * unitSize,
+            depth: depth,
+            notchSide,
+            notchRadius: notchRadius * unitSize,
+            color,
+          };
+          if (isGold) {
+            goldNotched.push(notchData);
+          } else {
+            tealNotched.push(notchData);
+          }
+        } else {
+          const target = isGold ? goldStandard : tealStandard;
+          target.positions.push([worldX, worldY, worldZ]);
+          target.scales.push([blockW * unitSize, blockH * unitSize, depth]);
+          target.colors.push(color);
+        }
+        
+        blockIndex++;
       }
     }
     
-    console.log(`Generated: ${teal.positions.length} teal, ${gold.positions.length} gold blocks`);
-    return { tealBlocks: teal, goldBlocks: gold };
+    console.log(`Wall: ${tealStandard.positions.length} teal std, ${tealNotched.length} teal notched, ${goldStandard.positions.length} gold std, ${goldNotched.length} gold notched`);
+    return { tealStandard, goldStandard, tealNotched, goldNotched };
   }, [noise]);
   
   useEffect(() => {
-    if (tealMeshRef.current && tealBlocks.positions.length > 0) {
-      for (let i = 0; i < tealBlocks.positions.length; i++) {
-        tempObject.position.set(...tealBlocks.positions[i]);
-        tempObject.scale.set(...tealBlocks.scales[i]);
-        tempObject.rotation.set(
-          (Math.random() - 0.5) * 0.15,
-          (Math.random() - 0.5) * 0.15,
-          (Math.random() - 0.5) * 0.15
-        );
+    if (tealMeshRef.current && wallData.tealStandard.positions.length > 0) {
+      for (let i = 0; i < wallData.tealStandard.positions.length; i++) {
+        const [x, y, z] = wallData.tealStandard.positions[i];
+        const [sx, sy, sz] = wallData.tealStandard.scales[i];
+        tempObject.position.set(x, y, z);
+        tempObject.scale.set(sx, sy, sz);
+        tempObject.rotation.set(0, 0, 0);
         tempObject.updateMatrix();
         tealMeshRef.current.setMatrixAt(i, tempObject.matrix);
-        tealMeshRef.current.setColorAt(i, tealBlocks.colors[i]);
+        tealMeshRef.current.setColorAt(i, wallData.tealStandard.colors[i]);
       }
       tealMeshRef.current.instanceMatrix.needsUpdate = true;
       tealMeshRef.current.instanceColor.needsUpdate = true;
     }
-  }, [tealBlocks, tempObject]);
+  }, [wallData.tealStandard, tempObject]);
   
   useEffect(() => {
-    if (goldMeshRef.current && goldBlocks.positions.length > 0) {
-      for (let i = 0; i < goldBlocks.positions.length; i++) {
-        tempObject.position.set(...goldBlocks.positions[i]);
-        tempObject.scale.set(...goldBlocks.scales[i]);
-        tempObject.rotation.set(
-          (Math.random() - 0.5) * 0.1,
-          (Math.random() - 0.5) * 0.1,
-          (Math.random() - 0.5) * 0.1
-        );
+    if (goldMeshRef.current && wallData.goldStandard.positions.length > 0) {
+      for (let i = 0; i < wallData.goldStandard.positions.length; i++) {
+        const [x, y, z] = wallData.goldStandard.positions[i];
+        const [sx, sy, sz] = wallData.goldStandard.scales[i];
+        tempObject.position.set(x, y, z);
+        tempObject.scale.set(sx, sy, sz);
+        tempObject.rotation.set(0, 0, 0);
         tempObject.updateMatrix();
         goldMeshRef.current.setMatrixAt(i, tempObject.matrix);
-        goldMeshRef.current.setColorAt(i, goldBlocks.colors[i]);
+        goldMeshRef.current.setColorAt(i, wallData.goldStandard.colors[i]);
       }
       goldMeshRef.current.instanceMatrix.needsUpdate = true;
       goldMeshRef.current.instanceColor.needsUpdate = true;
     }
-  }, [goldBlocks, tempObject]);
+  }, [wallData.goldStandard, tempObject]);
+  
+  const unitBoxGeo = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
   
   return (
     <>
       <instancedMesh 
         ref={tealMeshRef} 
-        args={[roundedBoxGeo, null, Math.max(tealBlocks.positions.length, 1)]} 
+        args={[unitBoxGeo, null, Math.max(wallData.tealStandard.positions.length, 1)]} 
         castShadow 
         receiveShadow
       >
@@ -275,15 +363,85 @@ function Chaos3DStructure({ noise }) {
       
       <instancedMesh 
         ref={goldMeshRef} 
-        args={[roundedBoxGeo, null, Math.max(goldBlocks.positions.length, 1)]} 
+        args={[unitBoxGeo, null, Math.max(wallData.goldStandard.positions.length, 1)]} 
         castShadow 
         receiveShadow
       >
         <GoldMaterial />
       </instancedMesh>
+      
+      {wallData.tealNotched.map((block, i) => (
+        <NotchedBlock key={`teal-notch-${i}`} {...block} materialType="teal" />
+      ))}
+      
+      {wallData.goldNotched.map((block, i) => (
+        <NotchedBlock key={`gold-notch-${i}`} {...block} materialType="gold" />
+      ))}
     </>
   );
 }
+
+function NotchedBlock({ position, width, height, depth, notchSide, notchRadius, color, materialType }) {
+  const geometry = useMemo(() => {
+    return createNotchedBlockGeometry(width, height, depth, notchSide, notchRadius);
+  }, [width, height, depth, notchSide, notchRadius]);
+  
+  const [goldDiffuse, goldNormal] = useTexture(['/gold.jpg', '/gold_normal.png']);
+  const [tealDiffuse, tealNormal] = useTexture(['/teal.jpg', '/teal.png']);
+  
+  const material = useMemo(() => {
+    if (materialType === 'gold') {
+      goldDiffuse.wrapS = goldDiffuse.wrapT = THREE.RepeatWrapping;
+      goldNormal.wrapS = goldNormal.wrapT = THREE.RepeatWrapping;
+      goldDiffuse.repeat.set(0.5, 0.5);
+      goldNormal.repeat.set(0.5, 0.5);
+      return new THREE.MeshStandardMaterial({
+        map: goldDiffuse,
+        normalMap: goldNormal,
+        normalScale: new THREE.Vector2(1, 1),
+        roughness: 0.2,
+        metalness: 1.0,
+        envMapIntensity: 2.0,
+        emissive: new THREE.Color(0x302000),
+        emissiveIntensity: 0.3,
+        color: color,
+      });
+    } else {
+      tealDiffuse.wrapS = tealDiffuse.wrapT = THREE.RepeatWrapping;
+      tealNormal.wrapS = tealNormal.wrapT = THREE.RepeatWrapping;
+      tealDiffuse.repeat.set(0.5, 0.5);
+      tealNormal.repeat.set(0.5, 0.5);
+      return new THREE.MeshStandardMaterial({
+        map: tealDiffuse,
+        normalMap: tealNormal,
+        normalScale: new THREE.Vector2(1, 1),
+        roughness: 0.5,
+        metalness: 0.7,
+        envMapIntensity: 1.2,
+        emissive: new THREE.Color(0x0a2020),
+        emissiveIntensity: 0.15,
+        color: color,
+      });
+    }
+  }, [materialType, color, goldDiffuse, goldNormal, tealDiffuse, tealNormal]);
+  
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      position={position}
+      castShadow
+      receiveShadow
+    />
+  );
+}
+
+// Keep old component for reference (commented out)
+/*
+function Chaos3DStructure({ noise }) {
+  // ... original implementation
+}
+*/
 
 
 
@@ -291,31 +449,31 @@ function DustParticles() {
   return (
     <>
       <Sparkles
-        count={800}
-        scale={[150, 250, 250]}
+        count={500}
+        scale={[100, 130, 80]}
         size={1.0}
-        speed={0.02}
-        opacity={0.2}
-        color={0x606060}
-        position={[0, 30, 0]}
-      />
-      <Sparkles
-        count={300}
-        scale={[80, 150, 150]}
-        size={2.0}
-        speed={0.03}
-        opacity={0.5}
-        color={0xffd040}
-        position={[0, 60, -30]}
+        speed={0.015}
+        opacity={0.3}
+        color={0x808080}
+        position={[0, 0, 30]}
       />
       <Sparkles
         count={200}
-        scale={[60, 100, 100]}
-        size={3.0}
-        speed={0.015}
-        opacity={0.8}
-        color={0xffb020}
-        position={[10, 80, 0]}
+        scale={[60, 80, 40]}
+        size={2.0}
+        speed={0.02}
+        opacity={0.6}
+        color={0xffd040}
+        position={[0, 20, 20]}
+      />
+      <Sparkles
+        count={100}
+        scale={[40, 60, 30]}
+        size={2.5}
+        speed={0.01}
+        opacity={0.7}
+        color={0x40ffff}
+        position={[-20, -10, 25]}
       />
     </>
   );
@@ -333,8 +491,8 @@ function FPSControls({ onLockChange, onDebugUpdate }) {
   
   useEffect(() => {
     if (!initialized.current) {
-      camera.position.set(0, 0, 25);
-      camera.lookAt(0, 20, -100);
+      camera.position.set(0, 0, 80);
+      camera.lookAt(0, 0, 0);
       initialized.current = true;
     }
   }, [camera]);
@@ -424,24 +582,24 @@ function Scene({ onLockChange, onDebugUpdate }) {
       <hemisphereLight args={[0xffffff, 0xc0c0c0, config.hemisphereIntensity]} />
       
       <directionalLight
-        position={[50, 200, 30]}
+        position={[30, 80, 100]}
         intensity={config.directionalIntensity}
         color={0xfffef8}
         castShadow
         shadow-mapSize={[4096, 4096]}
-        shadow-camera-far={400}
-        shadow-camera-left={-150}
-        shadow-camera-right={150}
-        shadow-camera-top={200}
-        shadow-camera-bottom={-200}
+        shadow-camera-far={300}
+        shadow-camera-left={-80}
+        shadow-camera-right={80}
+        shadow-camera-top={100}
+        shadow-camera-bottom={-100}
         shadow-bias={-0.0001}
       />
       
-      <pointLight position={[0, -50, 0]} intensity={2} color={0xffffff} distance={150} decay={2} />
-      <pointLight position={[-40, -30, -60]} intensity={1.5} color={0xe0e0e0} distance={120} decay={2} />
-      <pointLight position={[30, 20, 40]} intensity={2} color={0xfff0d0} distance={100} decay={2} />
+      <pointLight position={[0, 0, 60]} intensity={3} color={0xffffff} distance={200} decay={2} />
+      <pointLight position={[-30, 20, 50]} intensity={2} color={0x80ffff} distance={150} decay={2} />
+      <pointLight position={[30, -20, 50]} intensity={2} color={0xffd080} distance={150} decay={2} />
       
-      <Chaos3DStructure noise={noise} />
+      <BlockWallStructure noise={noise} />
       
       <DustParticles />
       
@@ -688,7 +846,7 @@ export default function App() {
       <Canvas
         id="game-canvas"
         shadows
-        camera={{ position: [0, 0, 25], fov: 70, near: 0.1, far: 500 }}
+        camera={{ position: [0, 0, 80], fov: 60, near: 0.1, far: 500 }}
         gl={{ 
           antialias: true, 
           toneMapping: THREE.ACESFilmicToneMapping, 
