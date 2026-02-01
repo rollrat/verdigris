@@ -65,6 +65,17 @@ function fbm(noise, x, y, z, octaves = 4) {
   return value / maxValue;
 }
 
+function domainWarp(noise, x, y, z, strength = 1.0) {
+  const warpX = fbm(noise, x + 100, y, z, 3) * strength;
+  const warpY = fbm(noise, x, y + 100, z, 3) * strength;
+  const warpZ = fbm(noise, x, y, z + 100, 3) * strength;
+  return [x + warpX, y + warpY, z + warpZ];
+}
+
+function ridgedNoise(noise, x, y, z) {
+  return 1.0 - Math.abs(fbm(noise, x, y, z, 5));
+}
+
 const TEAL_DARK = new THREE.Color(0x0a2a2a);
 const TEAL_MID = new THREE.Color(0x0d3838);
 const TEAL_DEEP = new THREE.Color(0x082020);
@@ -86,9 +97,11 @@ function GoldMaterial() {
       map={diffuse}
       normalMap={normal}
       normalScale={[1, 1]}
-      roughness={0.25}
-      metalness={0.95}
-      envMapIntensity={1.5}
+      roughness={0.2}
+      metalness={1.0}
+      envMapIntensity={2.0}
+      emissive={0x302000}
+      emissiveIntensity={0.3}
     />
   );
 }
@@ -106,9 +119,11 @@ function TealMaterial() {
       map={diffuse}
       normalMap={normal}
       normalScale={[1, 1]}
-      roughness={0.7}
-      metalness={0.4}
-      envMapIntensity={0.6}
+      roughness={0.5}
+      metalness={0.7}
+      envMapIntensity={1.2}
+      emissive={0x0a2020}
+      emissiveIntensity={0.15}
     />
   );
 }
@@ -122,53 +137,74 @@ function Chaos3DStructure({ noise }) {
     const teal = { positions: [], scales: [], colors: [] };
     const gold = { positions: [], scales: [], colors: [] };
     
-    const size = 100;
-    const spacing = 3.0;
-    const threshold = 0.08;
-    const goldThreshold = 0.52;
+    const sizeX = 120;
+    const sizeY = 160;
+    const sizeZ = 160;
+    const spacing = 3.5;
+    const baseThreshold = 0.45;
+    const goldThreshold = 0.58;
     
-    for (let x = -size/2; x < size/2; x += spacing) {
-      for (let y = -size/2; y < size/2; y += spacing) {
-        for (let z = -size/2; z < size/2; z += spacing) {
+    const seededRandom = (seed) => {
+      const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    
+    let blockIndex = 0;
+    
+    for (let x = -sizeX/2; x < sizeX/2; x += spacing) {
+      for (let y = -sizeY/2; y < sizeY/2; y += spacing) {
+        for (let z = -sizeZ/2; z < sizeZ/2; z += spacing) {
           
-          const nx = x * 0.025;
-          const ny = y * 0.025;
-          const nz = z * 0.025;
+          const [wx, wy, wz] = domainWarp(noise, x * 0.012, y * 0.008, z * 0.012, 8.0);
           
-          const density = fbm(noise, nx, ny, nz, 4);
+          const baseDensity = ridgedNoise(noise, wx, wy, wz);
+          const pillarNoise = fbm(noise, x * 0.02, y * 0.003, z * 0.02, 4);
+          const caveNoise = fbm(noise, x * 0.015 + 50, y * 0.015, z * 0.015 + 50, 5);
+          
+          const verticalBias = Math.exp(-Math.abs(y) * 0.003) * 0.3;
+          const density = baseDensity * 0.5 + pillarNoise * 0.35 + verticalBias + caveNoise * 0.15;
+          
+          const distXZ = Math.sqrt(x*x + z*z);
+          const corridorWidth = 12 + fbm(noise, y * 0.02, 0, 0, 2) * 8;
+          const inCorridor = distXZ < corridorWidth && y > -80 && y < 80;
+          
+          const threshold = inCorridor ? baseThreshold + 0.25 : baseThreshold;
           
           if (density < threshold) continue;
           
-          const distFromCenter = Math.sqrt(x*x*0.3 + y*y*0.5 + z*z*0.2);
-          if (distFromCenter > size * 0.55) continue;
+          const falloff = Math.max(0, 1 - Math.pow(distXZ / (sizeX * 0.6), 2));
+          if (seededRandom(blockIndex * 3.7) > falloff + 0.3) {
+            blockIndex++;
+            continue;
+          }
           
-          const canyonFactor = Math.abs(x) < 18 ? 0.7 : 1.0;
-          if (density < threshold + 0.15 * canyonFactor && Math.abs(x) < 15 && y > -30 && y < 40) continue;
+          const goldNoise1 = noise(x * 0.04 + 100, y * 0.06, z * 0.04);
+          const goldNoise2 = noise(x * 0.08, y * 0.03 + 200, z * 0.08);
+          const isGold = goldNoise1 > goldThreshold || (goldNoise2 > 0.6 && y > 0);
           
-          const goldNoise = noise(x * 0.06 + 100, y * 0.08, z * 0.06);
-          const isGold = goldNoise > goldThreshold;
+          const scaleNoise = Math.abs(noise(x * 0.1, y * 0.1, z * 0.1));
+          const rand1 = seededRandom(blockIndex * 1.1);
+          const rand2 = seededRandom(blockIndex * 2.3);
+          const rand3 = seededRandom(blockIndex * 3.7);
           
-          const scaleVariation = 0.5 + Math.abs(noise(x * 0.3, y * 0.3, z * 0.3)) * 1.8;
-          const scaleX = spacing * scaleVariation * (0.7 + Math.random() * 0.6);
-          const scaleY = spacing * scaleVariation * (0.7 + Math.random() * 0.6);
-          const scaleZ = spacing * scaleVariation * (0.7 + Math.random() * 0.6);
+          const cubeSize = spacing * (0.6 + scaleNoise * 1.5);
           
-          const jitterX = (Math.random() - 0.5) * spacing * 0.4;
-          const jitterY = (Math.random() - 0.5) * spacing * 0.4;
-          const jitterZ = (Math.random() - 0.5) * spacing * 0.4;
+          const jitterX = (rand1 - 0.5) * spacing * 0.6;
+          const jitterY = (rand2 - 0.5) * spacing * 0.6;
+          const jitterZ = (rand3 - 0.5) * spacing * 0.6;
           
           const pos = [x + jitterX, y + jitterY, z + jitterZ];
-          const scale = [scaleX, scaleY, scaleZ];
+          const scale = [cubeSize, cubeSize, cubeSize];
           
           if (isGold) {
             gold.positions.push(pos);
             gold.scales.push(scale);
-            const colorVar = Math.random();
+            const colorVar = seededRandom(blockIndex * 5.1);
             gold.colors.push(colorVar > 0.5 ? GOLD_BRIGHT.clone() : GOLD_DARK.clone());
           } else {
             teal.positions.push(pos);
             teal.scales.push(scale);
-            const colorVar = Math.random();
+            const colorVar = seededRandom(blockIndex * 7.3);
             if (colorVar < 0.4) {
               teal.colors.push(TEAL_DARK.clone());
             } else if (colorVar < 0.75) {
@@ -177,6 +213,8 @@ function Chaos3DStructure({ noise }) {
               teal.colors.push(TEAL_DEEP.clone());
             }
           }
+          
+          blockIndex++;
         }
       }
     }
@@ -252,31 +290,31 @@ function DustParticles() {
   return (
     <>
       <Sparkles
-        count={600}
-        scale={[100, 150, 200]}
-        size={1.2}
-        speed={0.04}
-        opacity={0.3}
-        color={0xd0d0d0}
-        position={[0, 20, 0]}
+        count={800}
+        scale={[150, 250, 250]}
+        size={1.0}
+        speed={0.02}
+        opacity={0.2}
+        color={0x606060}
+        position={[0, 30, 0]}
       />
       <Sparkles
-        count={400}
-        scale={[80, 100, 150]}
-        size={1.8}
-        speed={0.06}
-        opacity={0.5}
-        color={0xffffff}
-        position={[0, 40, -20]}
-      />
-      <Sparkles
-        count={150}
-        scale={[50, 80, 100]}
-        size={2.5}
+        count={300}
+        scale={[80, 150, 150]}
+        size={2.0}
         speed={0.03}
-        opacity={0.6}
-        color={0xffd860}
-        position={[0, 50, 0]}
+        opacity={0.5}
+        color={0xffd040}
+        position={[0, 60, -30]}
+      />
+      <Sparkles
+        count={200}
+        scale={[60, 100, 100]}
+        size={3.0}
+        speed={0.015}
+        opacity={0.8}
+        color={0xffb020}
+        position={[10, 80, 0]}
       />
     </>
   );
@@ -294,8 +332,8 @@ function FPSControls({ onLockChange, onDebugUpdate }) {
   
   useEffect(() => {
     if (!initialized.current) {
-      camera.position.set(0, 5, 45);
-      camera.lookAt(0, 5, -50);
+      camera.position.set(0, 0, 25);
+      camera.lookAt(0, 20, -100);
       initialized.current = true;
     }
   }, [camera]);
@@ -359,43 +397,30 @@ function Scene({ onLockChange, onDebugUpdate }) {
     <>
       <FPSControls onLockChange={onLockChange} onDebugUpdate={onDebugUpdate} />
       
-      <color attach="background" args={[0x1a3038]} />
-      <fogExp2 attach="fog" args={[0x203540, 0.009]} />
+      <color attach="background" args={[0x0a1818]} />
+      <fogExp2 attach="fog" args={[0x0a1515, 0.008]} />
       
-      <Environment preset="sunset" background={false} />
+      <Environment preset="night" background={false} />
       
-      <ambientLight intensity={1.2} color={0x607080} />
-      <hemisphereLight args={[0xfff8e0, 0x304040, 1.4]} />
+      <ambientLight intensity={0.4} color={0x304040} />
+      <hemisphereLight args={[0x404040, 0x101818, 0.6]} />
       
       <directionalLight
-        position={[0, 120, 0]}
-        intensity={10}
-        color={0xfff8e0}
+        position={[20, 200, -30]}
+        intensity={15}
+        color={0xfff4d0}
         castShadow
         shadow-mapSize={[4096, 4096]}
-        shadow-camera-far={250}
-        shadow-camera-left={-120}
-        shadow-camera-right={120}
-        shadow-camera-top={120}
-        shadow-camera-bottom={-120}
+        shadow-camera-far={400}
+        shadow-camera-left={-150}
+        shadow-camera-right={150}
+        shadow-camera-top={200}
+        shadow-camera-bottom={-200}
         shadow-bias={-0.0001}
       />
       
-      <directionalLight
-        position={[-50, 100, -30]}
-        intensity={3}
-        color={0xd0f0f0}
-      />
-      
-      <directionalLight
-        position={[30, 90, 40]}
-        intensity={2.5}
-        color={0xffe090}
-      />
-      
-      <pointLight position={[0, 30, 0]} intensity={4} color={0x80c0c0} distance={80} decay={1.5} />
-      <pointLight position={[-20, 50, -30]} intensity={3} color={0xa0e0e0} distance={100} decay={1.5} />
-      <pointLight position={[20, 45, 30]} intensity={3.5} color={0xffc060} distance={90} decay={1.5} />
+      <pointLight position={[0, -50, 0]} intensity={0.8} color={0x1a4040} distance={150} decay={2} />
+      <pointLight position={[-40, -30, -60]} intensity={0.5} color={0x0a2020} distance={120} decay={2} />
       
       <Chaos3DStructure noise={noise} />
       
@@ -403,12 +428,12 @@ function Scene({ onLockChange, onDebugUpdate }) {
       
       <EffectComposer>
         <Bloom
-          intensity={1.0}
-          luminanceThreshold={0.35}
-          luminanceSmoothing={0.7}
-          radius={0.6}
+          intensity={1.5}
+          luminanceThreshold={0.25}
+          luminanceSmoothing={0.8}
+          radius={0.8}
         />
-        <Vignette eskil={false} offset={0.4} darkness={0.35} />
+        <Vignette eskil={false} offset={0.35} darkness={0.5} />
       </EffectComposer>
     </>
   );
@@ -564,11 +589,11 @@ export default function App() {
     <div style={{ width: '100vw', height: '100vh', background: '#020808' }}>
       <Canvas
         shadows
-        camera={{ position: [0, 5, 45], fov: 75, near: 0.1, far: 300 }}
+        camera={{ position: [0, 0, 25], fov: 70, near: 0.1, far: 500 }}
         gl={{ 
           antialias: true, 
           toneMapping: THREE.ACESFilmicToneMapping, 
-          toneMappingExposure: 1.6,
+          toneMappingExposure: 1.3,
           powerPreference: 'high-performance',
         }}
         dpr={[1, 1.5]}
