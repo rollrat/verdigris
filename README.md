@@ -1,4 +1,4 @@
-# Oxidized Depths
+# Verdigris
 
 A 3D procedural "Ancient Sci-Fi Ruins" scene built with React Three Fiber. Explore massive geometric metal structures with oxidized copper and gold materials, atmospheric fog, and dramatic lighting.
 

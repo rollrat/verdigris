@@ -493,8 +493,8 @@ function ControlsOverlay({ isLocked }) {
   
   return (
     <div style={overlayStyle}>
-      <div style={titleStyle}>Ancient Ruins</div>
-      <div style={subtitleStyle}>Oxidized Depths</div>
+      <div style={titleStyle}>Verdigris</div>
+      <div style={subtitleStyle}>Ancient Depths</div>
       <div style={instructionStyle}>
         <span style={keyStyle}>W</span>
         <span style={keyStyle}>A</span>
