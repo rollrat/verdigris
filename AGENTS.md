@@ -1,41 +1,6 @@
 # AGENTS.md
 
-AI 에이전트를 위한 프로젝트 컨텍스트 및 커밋 가이드라인.
-
-## Project Context
-
-**Verdigris**는 React Three Fiber로 구현된 3D 프로시저럴 "Ancient Sci-Fi Ruins" 탐험 씬입니다.
-
-### Core Concepts
-
-| Concept | Description |
-|---------|-------------|
-| **Procedural Geometry** | FBM noise + domain warping으로 생성되는 거대 구조물 |
-| **Materials** | Teal (산화동) + Gold (금속 정맥) PBR 재질 |
-| **Atmosphere** | Fog, Bloom, Vignette 등 포스트 프로세싱 |
-| **FPS Controls** | PointerLockControls 기반 1인칭 탐험 |
-
-### Tech Stack
-
-- React Three Fiber
-- @react-three/drei
-- @react-three/postprocessing
-- leva (control panel)
-- Vite
-
-## Architecture
-
-```
-src/
-├── App.jsx              # 메인 씬 컴포넌트
-└── main.jsx             # 엔트리 포인트
-
-public/
-├── gold.jpg             # Gold diffuse texture
-├── gold_normal.png      # Gold normal map
-├── teal.jpg             # Teal diffuse texture
-└── teal.png             # Teal normal map
-```
+AI 에이전트를 위한 커밋 가이드라인.
 
 ## Commit Guidelines
 
@@ -90,21 +55,3 @@ feat(controls): add leva control panel for atmosphere settings
 fix(scene): adjust lighting for brighter daytime atmosphere
 chore: add leva dependency for UI controls
 ```
-
-## Development
-
-```bash
-npm install
-npm run dev
-```
-
-## Controls
-
-| Key | Action |
-|-----|--------|
-| `W` `A` `S` `D` | Move |
-| `Mouse` | Look around |
-| `Space` | Fly up |
-| `Ctrl` | Fly down |
-| `Shift` | Sprint |
-| `Esc` | Unlock cursor |
