@@ -392,9 +392,20 @@ function FPSControls({ onLockChange, onDebugUpdate }) {
   );
 }
 
-function Scene({ onLockChange, onDebugUpdate, config }) {
+function Scene({ onLockChange, onDebugUpdate }) {
   const noise = useMemo(() => createNoise(42), []);
   const { gl } = useThree();
+  
+  const config = useControls('Atmosphere', {
+    bgColor: { value: '#c8dce8', label: 'Background' },
+    ambientIntensity: { value: 2.5, min: 0, max: 5, step: 0.01, label: 'Ambient' },
+    hemisphereIntensity: { value: 2.5, min: 0, max: 5, step: 0.05, label: 'Hemisphere' },
+    directionalIntensity: { value: 25, min: 0, max: 50, step: 0.5, label: 'Sun Light' },
+    fogDensity: { value: 0.003, min: 0, max: 0.03, step: 0.001, label: 'Fog' },
+    bloomIntensity: { value: 0.5, min: 0, max: 3, step: 0.1, label: 'Bloom' },
+    exposure: { value: 2.2, min: 0.5, max: 4, step: 0.05, label: 'Exposure' },
+    vignetteDarkness: { value: 0.1, min: 0, max: 1, step: 0.05, label: 'Vignette' },
+  });
 
   useEffect(() => {
     gl.toneMappingExposure = config.exposure;
@@ -589,17 +600,6 @@ export default function App() {
     isLocked: false,
   });
   
-  const config = useControls('Atmosphere', {
-    bgColor: { value: '#c8dce8', label: 'Background' },
-    ambientIntensity: { value: 2.5, min: 0, max: 5, step: 0.01, label: 'Ambient' },
-    hemisphereIntensity: { value: 2.5, min: 0, max: 5, step: 0.05, label: 'Hemisphere' },
-    directionalIntensity: { value: 25, min: 0, max: 50, step: 0.5, label: 'Sun Light' },
-    fogDensity: { value: 0.003, min: 0, max: 0.03, step: 0.001, label: 'Fog' },
-    bloomIntensity: { value: 0.5, min: 0, max: 3, step: 0.1, label: 'Bloom' },
-    exposure: { value: 2.2, min: 0.5, max: 4, step: 0.05, label: 'Exposure' },
-    vignetteDarkness: { value: 0.1, min: 0, max: 1, step: 0.05, label: 'Vignette' },
-  });
-
   const handleLockChange = useCallback((locked) => {
     setIsLocked(locked);
     if (locked && !hasEntered) {
@@ -692,15 +692,14 @@ export default function App() {
         gl={{ 
           antialias: true, 
           toneMapping: THREE.ACESFilmicToneMapping, 
-          toneMappingExposure: config.exposure,
+          toneMappingExposure: 2.2,
           powerPreference: 'high-performance',
         }}
         dpr={[1, 1.5]}
       >
         <Scene 
           onLockChange={handleLockChange} 
-          onDebugUpdate={handleDebugUpdate} 
-          config={config}
+          onDebugUpdate={handleDebugUpdate}
         />
       </Canvas>
       <ControlsOverlay hasEntered={hasEntered} />
