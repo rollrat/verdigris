@@ -4,6 +4,7 @@ import { PointerLockControls, Sparkles, Environment, useTexture } from '@react-t
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three-stdlib';
+import { useControls, Leva } from 'leva';
 
 function createNoise(seed = 0) {
   const permutation = [];
@@ -384,31 +385,37 @@ function FPSControls({ onLockChange, onDebugUpdate }) {
   return (
     <PointerLockControls
       ref={controlsRef}
+      selector="#game-canvas"
       onLock={() => onLockChange(true)}
       onUnlock={() => onLockChange(false)}
     />
   );
 }
 
-function Scene({ onLockChange, onDebugUpdate }) {
+function Scene({ onLockChange, onDebugUpdate, config }) {
   const noise = useMemo(() => createNoise(42), []);
+  const { gl } = useThree();
+
+  useEffect(() => {
+    gl.toneMappingExposure = config.exposure;
+  }, [gl, config.exposure]);
   
   return (
     <>
       <FPSControls onLockChange={onLockChange} onDebugUpdate={onDebugUpdate} />
       
-      <color attach="background" args={[0x0a1818]} />
-      <fogExp2 attach="fog" args={[0x0a1515, 0.008]} />
+      <color attach="background" args={[config.bgColor]} />
+      <fogExp2 attach="fog" args={[config.bgColor, config.fogDensity]} />
       
-      <Environment preset="night" background={false} />
+      <Environment preset="apartment" background={false} />
       
-      <ambientLight intensity={0.4} color={0x304040} />
-      <hemisphereLight args={[0x404040, 0x101818, 0.6]} />
+      <ambientLight intensity={config.ambientIntensity} color={0xffffff} />
+      <hemisphereLight args={[0xffffff, 0xc0c0c0, config.hemisphereIntensity]} />
       
       <directionalLight
-        position={[20, 200, -30]}
-        intensity={15}
-        color={0xfff4d0}
+        position={[50, 200, 30]}
+        intensity={config.directionalIntensity}
+        color={0xfffef8}
         castShadow
         shadow-mapSize={[4096, 4096]}
         shadow-camera-far={400}
@@ -419,8 +426,9 @@ function Scene({ onLockChange, onDebugUpdate }) {
         shadow-bias={-0.0001}
       />
       
-      <pointLight position={[0, -50, 0]} intensity={0.8} color={0x1a4040} distance={150} decay={2} />
-      <pointLight position={[-40, -30, -60]} intensity={0.5} color={0x0a2020} distance={120} decay={2} />
+      <pointLight position={[0, -50, 0]} intensity={2} color={0xffffff} distance={150} decay={2} />
+      <pointLight position={[-40, -30, -60]} intensity={1.5} color={0xe0e0e0} distance={120} decay={2} />
+      <pointLight position={[30, 20, 40]} intensity={2} color={0xfff0d0} distance={100} decay={2} />
       
       <Chaos3DStructure noise={noise} />
       
@@ -428,12 +436,12 @@ function Scene({ onLockChange, onDebugUpdate }) {
       
       <EffectComposer>
         <Bloom
-          intensity={1.5}
+          intensity={config.bloomIntensity}
           luminanceThreshold={0.25}
           luminanceSmoothing={0.8}
           radius={0.8}
         />
-        <Vignette eskil={false} offset={0.35} darkness={0.5} />
+        <Vignette eskil={false} offset={0.35} darkness={config.vignetteDarkness} />
       </EffectComposer>
     </>
   );
@@ -498,23 +506,8 @@ const clickPromptStyle = {
   animation: 'pulse 3s ease-in-out infinite',
 };
 
-function ControlsOverlay({ isLocked }) {
-  if (isLocked) {
-    return (
-      <div style={{
-        position: 'absolute',
-        bottom: '15px',
-        left: '15px',
-        color: 'rgba(100, 130, 130, 0.3)',
-        fontFamily: "'Segoe UI', system-ui, sans-serif",
-        fontSize: '0.7rem',
-        pointerEvents: 'none',
-        zIndex: 100,
-      }}>
-        <span style={{ ...keyStyle, opacity: 0.4 }}>ESC</span> unlock
-      </div>
-    );
-  }
+function ControlsOverlay({ hasEntered }) {
+  if (hasEntered) return null;
   
   return (
     <div style={overlayStyle}>
@@ -575,33 +568,144 @@ function DebugOverlay({ debug }) {
   );
 }
 
+
+
+const levaStyles = `
+  .leva-c-kWgxhW {
+    right: auto !important;
+    left: 20px !important;
+  }
+  [class*="leva-"] {
+    pointer-events: auto !important;
+  }
+`;
+
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
+  const [hasEntered, setHasEntered] = useState(false);
   const [debug, setDebug] = useState({
     position: { x: '0', y: '0', z: '0' },
     keys: 'none',
     isLocked: false,
   });
   
+  const config = useControls('Atmosphere', {
+    bgColor: { value: '#c8dce8', label: 'Background' },
+    ambientIntensity: { value: 2.5, min: 0, max: 5, step: 0.01, label: 'Ambient' },
+    hemisphereIntensity: { value: 2.5, min: 0, max: 5, step: 0.05, label: 'Hemisphere' },
+    directionalIntensity: { value: 25, min: 0, max: 50, step: 0.5, label: 'Sun Light' },
+    fogDensity: { value: 0.003, min: 0, max: 0.03, step: 0.001, label: 'Fog' },
+    bloomIntensity: { value: 0.5, min: 0, max: 3, step: 0.1, label: 'Bloom' },
+    exposure: { value: 2.2, min: 0.5, max: 4, step: 0.05, label: 'Exposure' },
+    vignetteDarkness: { value: 0.1, min: 0, max: 1, step: 0.05, label: 'Vignette' },
+  });
+
+  const handleLockChange = useCallback((locked) => {
+    setIsLocked(locked);
+    if (locked && !hasEntered) {
+      setHasEntered(true);
+    }
+  }, [hasEntered]);
+  
   const handleDebugUpdate = useCallback((data) => setDebug(data), []);
   
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#020808' }}>
+      <Leva 
+        collapsed={false}
+        oneLineLabels={false}
+        flat={false}
+
+        theme={{
+          colors: {
+            elevation1: 'rgba(2, 8, 8, 0.95)',
+            elevation2: 'rgba(10, 24, 24, 0.95)',
+            elevation3: 'rgba(20, 40, 40, 0.9)',
+            accent1: '#d4a000',
+            accent2: '#b08000',
+            accent3: '#906000',
+            highlight1: '#80a0a0',
+            highlight2: '#608080',
+            highlight3: '#405050',
+            vivid1: '#d4a000',
+            folderWidgetColor: '#d4a000',
+            folderTextColor: '#80a0a0',
+            toolTipBackground: 'rgba(2, 8, 8, 0.95)',
+            toolTipText: '#80a0a0',
+          },
+          radii: {
+            xs: '2px',
+            sm: '3px',
+            lg: '4px',
+          },
+          space: {
+            sm: '6px',
+            md: '12px',
+            rowGap: '8px',
+            colGap: '8px',
+          },
+          fonts: {
+            mono: 'monospace',
+            sans: 'system-ui, sans-serif',
+          },
+          fontSizes: {
+            root: '12px',
+            toolTip: '11px',
+          },
+          sizes: {
+            rootWidth: '300px',
+            controlWidth: '160px',
+            numberInputMinWidth: '56px',
+            scrubberWidth: '8px',
+            scrubberHeight: '16px',
+            rowHeight: '28px',
+            folderTitleHeight: '24px',
+            checkboxSize: '16px',
+            joystickWidth: '100px',
+            joystickHeight: '100px',
+            colorPickerWidth: '160px',
+            colorPickerHeight: '100px',
+            imagePreviewWidth: '100px',
+            imagePreviewHeight: '100px',
+            monitorHeight: '64px',
+            titleBarHeight: '39px',
+          },
+          borderWidths: {
+            root: '1px',
+            input: '1px',
+            focus: '1px',
+            hover: '1px',
+            active: '1px',
+            folder: '1px',
+          },
+          fontWeights: {
+            label: 'normal',
+            folder: 'normal',
+            button: 'normal',
+          },
+        }}
+      />
       <Canvas
+        id="game-canvas"
         shadows
         camera={{ position: [0, 0, 25], fov: 70, near: 0.1, far: 500 }}
         gl={{ 
           antialias: true, 
           toneMapping: THREE.ACESFilmicToneMapping, 
-          toneMappingExposure: 1.3,
+          toneMappingExposure: config.exposure,
           powerPreference: 'high-performance',
         }}
         dpr={[1, 1.5]}
       >
-        <Scene onLockChange={setIsLocked} onDebugUpdate={handleDebugUpdate} />
+        <Scene 
+          onLockChange={handleLockChange} 
+          onDebugUpdate={handleDebugUpdate} 
+          config={config}
+        />
       </Canvas>
-      <ControlsOverlay isLocked={isLocked} />
+      <ControlsOverlay hasEntered={hasEntered} />
       <DebugOverlay debug={debug} />
+      <style>{levaStyles}</style>
     </div>
   );
 }
